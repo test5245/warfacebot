@@ -26,7 +26,7 @@ void xmpp_iq_player_status(int status)
     send_stream_format(session.wfs,
                        "<iq to='k01.warface' type='get'>"
                        "<query xmlns='urn:cryonline:k01'>"
-                       "<player_status prev_status='%d' new_status='%d'"
+                       "<player_status prev_status='%u' new_status='%u'"
                        "               to='%s'/>"
                        "</query>"
                        "</iq>",
@@ -35,5 +35,9 @@ void xmpp_iq_player_status(int status)
 
     list_foreach(session.friends,
                  (f_list_callback) xmpp_iq_peer_status_update_friend,
+                 NULL);
+
+    list_foreach(session.clanmates,
+                 (f_list_callback) xmpp_iq_peer_clan_member_update_clanmate,
                  NULL);
 }

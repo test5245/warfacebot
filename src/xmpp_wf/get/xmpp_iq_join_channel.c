@@ -22,10 +22,18 @@
 #include <wb_xmpp.h>
 #include <wb_xmpp_wf.h>
 #include <wb_game.h>
+#include <wb_mission.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+struct cb_args
+{
+    char *channel;
+    f_join_channel_cb cb;
+    void *args;
+};
 
 static void xmpp_iq_join_channel_cb(const char *msg, void *args)
 {
@@ -37,49 +45,112 @@ static void xmpp_iq_join_channel_cb(const char *msg, void *args)
       </iq>
      */
 
+    struct cb_args *a = (struct cb_args *) args;
     char *data = wf_get_query_content(msg);
 
     if (xmpp_is_error(msg))
     {
-        fprintf(stderr, "Failed to join channel\n");
-        return;
-    }
+        fprintf(stderr, "Failed to join channel\nReason: ");
 
-    if (data != NULL)
-    {
-        session.experience = get_info_int(data, "experience='", "'", "EXPERIENCE");
+        int code = get_info_int(msg, "code='", "'", NULL);
+        int custom_code = get_info_int(msg, "custom_code='", "'", NULL);
 
-        char *m = data;
-
-        while ((m = strstr(m, "<notif")))
+        switch (code)
         {
-            char *notif = get_info(m, "<notif", "</notif>", NULL);
+            case 1006:
+                fprintf(stderr, "QoS limit reached\n");
+                break;
+            case 503:
+                fprintf(stderr, "Invalid channel (%s)\n", a->channel);
+                break;
+            case 8:
+                switch (custom_code)
+                {
+                    case 0:
+                        fprintf(stderr, "Invalid token (%s) or userid (%s)\n",
+                                session.active_token,
+                                session.online_id);
+                        break;
+                    case 1:
+                        fprintf(stderr, "Invalid profile_id (%s)\n",
+                                session.profile_id);
+                        break;
+                    case 2:
+                        fprintf(stderr, "Game version mismatch (%s)\n",
+                                game_version_get());
+                        break;
+                    default:
+                        fprintf(stderr, "Unknown\n");
+                        break;
+                }
+            default:
+                fprintf(stderr, "Unknown\n");
+                break;
+        }
+    }
+    else
+    {
+        /* Leave previous room if any */
+        xmpp_iq_gameroom_leave();
 
-            xmpp_iq_confirm_notification(notif);
-            free(notif);
-            ++m;
+        if (data != NULL)
+        {
+            session.experience = get_info_int(data, "experience='", "'", "EXPERIENCE");
+
+            if (a->channel != NULL)
+            {
+                free(session.channel);
+                session.channel = strdup(a->channel);
+            }
+
+
+            char *m = data;
+
+            while ((m = strstr(m, "<notif")))
+            {
+                char *notif = get_info(m, "<notif", "</notif>", NULL);
+
+                xmpp_iq_confirm_notification(notif);
+                free(notif);
+                ++m;
+            }
         }
 
-        free(data);
+        /* Ask for today's missions list */
+        mission_list_update(NULL, NULL);
+
+        /* Inform to k01 our status */
+        xmpp_iq_player_status(STATUS_ONLINE | STATUS_LOBBY);
+
+        if (a->cb)
+            a->cb(a->args);
     }
 
-    /* Inform to k01 our status */
-    xmpp_iq_player_status(STATUS_ONLINE | STATUS_LOBBY);
+    free(data);
+    free(a->channel);
+    free(a);
 }
 
-void xmpp_iq_join_channel(const char *channel)
+void xmpp_iq_join_channel(const char *channel, f_join_channel_cb f, void *args)
 {
     int is_switch = session.status >= STATUS_LOBBY;
+    struct cb_args *a = calloc(1, sizeof (struct cb_args));
+
+    a->cb = f;
+    a->args = args;
+
+    if (channel == NULL)
+        channel = session.channel;
+
+    if (channel)
+        a->channel = strdup(channel);
+    else
+        a->channel = NULL;
+
     t_uid id;
 
     idh_generate_unique_id(&id);
-    idh_register(&id, 0, xmpp_iq_join_channel_cb, NULL);
-
-    if (channel != NULL)
-    {
-        free(session.channel);
-        session.channel = strdup(channel);
-    }
+    idh_register(&id, 0, xmpp_iq_join_channel_cb, a);
 
     /* Join CryOnline channel */
     send_stream_format(session.wfs,
@@ -93,5 +164,5 @@ void xmpp_iq_join_channel(const char *channel)
                        &id, is_switch ? "switch" : "join",
                        game_version_get(),
                        session.active_token, session.profile_id,
-                       session.online_id, session.channel);
+                       session.online_id, a->channel);
 }

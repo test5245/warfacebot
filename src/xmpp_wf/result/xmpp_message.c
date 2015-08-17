@@ -18,11 +18,13 @@
 
 #include <wb_tools.h>
 #include <wb_stream.h>
+#include <wb_xml.h>
 #include <wb_xmpp.h>
 #include <wb_xmpp_wf.h>
 #include <wb_session.h>
 #include <wb_mission.h>
 #include <wb_list.h>
+#include <wb_cmd.h>
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -55,56 +57,40 @@ static void handle_private_message_(const char *msg_id, const char *msg)
     char *nick_from = get_info(msg, "<message from='", "'", NULL);
     char *jid_from = get_info(msg, "<iq from='", "'", NULL);
 
+    /* Deserialize message */
+
+    xml_deserialize_inplace(&message);
+
     /* Feedback the user what was sent */
 
-    xmpp_send_message(session.wfs, nick_from, session.jid,
-                      session.nickname, jid_from,
-                      message, msg_id);
+    xmpp_ack_message(nick_from, jid_from, message, msg_id);
 
     /* Determine the correct command */
 
     if (strstr(message, "leave"))
     {
-        xmpp_iq_gameroom_leave();
+        cmd_leave();
 
-        xmpp_send_message(session.wfs, session.nickname, session.jid,
-                          nick_from, jid_from,
-                          "but whyy :(", NULL);
+        xmpp_send_message(nick_from, jid_from, "but whyy :(");
     }
 
-    else if (strstr(message, "ready"))
+    else if (strstr(message, "ready") || strstr(message, "take"))
     {
-        send_stream_format(session.wfs,
-                           "<iq to='masterserver@warface/%s' type='get'>"
-                           " <query xmlns='urn:cryonline:k01'>"
-                           "  <gameroom_setplayer team_id='0' status='1' class_id='0'/>"
-                           " </query>"
-                           "</iq>",
-                           session.channel);
+        cmd_ready(strstr(message, " "));
 
-        xmpp_send_message(session.wfs, session.nickname, session.jid,
-                          nick_from, jid_from,
-                          "go", NULL);
+        xmpp_send_message(nick_from, jid_from, "go");
     }
 
     else if (strstr(message, "invite"))
     {
-        send_stream_format(session.wfs,
-                           "<iq to='masterserver@warface/%s' type='get'>"
-                           " <query xmlns='urn:cryonline:k01'>"
-                           "  <invitation_send nickname='%s' is_follow='0'/>"
-                           " </query>"
-                           "</iq>",
-                           session.channel, nick_from);
+        cmd_invite(nick_from, 0);
     }
 
     else if (strstr(message, "master"))
     {
-        xmpp_promote_room_master(nick_from);
+        cmd_master(nick_from);
 
-        xmpp_send_message(session.wfs, session.nickname, session.jid,
-                          nick_from, jid_from,
-                          "Yep, just a sec.", NULL);
+        xmpp_send_message(nick_from, jid_from, "Yep, just a sec.");
 
     }
 
@@ -117,64 +103,30 @@ static void handle_private_message_(const char *msg_id, const char *msg)
         else
             nickname++;
 
-        xmpp_iq_profile_info_get_status(nickname, nick_from, jid_from);
+        cmd_whois(nickname, nick_from, jid_from);
     }
 
     else if (strstr(message, "missions"))
     {
-        struct cb_args
-        {
-            char *nick_from;
-            char *jid_from;
-        };
+        cmd_missions(nick_from, jid_from);
+    }
 
-        void cbm(struct mission *m, void *args)
-        {
-            struct cb_args *a = (struct cb_args *) args;
-            char *answer;
-            FORMAT(answer, "mission %s %i %i",
-                   m->type,
-                   m->crown_time_gold,
-                   m->crown_perf_gold);
-
-            xmpp_send_message(session.wfs, session.nickname, session.jid,
-                              a->nick_from, a->jid_from,
-                              answer, NULL);
-
-            free(answer);
-        }
-
-        void cb(struct list *l, void *args)
-        {
-            struct cb_args *a = (struct cb_args *) args;
-
-            list_foreach(l, (f_list_callback) cbm, args);
-
-            list_free(l);
-            free(a->jid_from);
-            free(a->nick_from);
-            free(a);
-        }
-
-        struct cb_args *a = calloc(1, sizeof (struct cb_args));
-        a->nick_from = strdup(nick_from);
-        a->jid_from = strdup(jid_from);
-        xmpp_iq_missions_get_list(cb, a);
+    else if (strstr(message, "say"))
+    {
+        cmd_say(strchr(message, ' '));
     }
 
     else
     {
         int r = rand() % 4;
         const char *answer =
-            r == 0 ? "I&apos;m sorry Dave. I&apos;m afraid I can&apos;t do that." :
+            r == 0 ? "I'm sorry Dave. I'm afraid I can't do that." :
             r == 1 ? "It can only be attributable to human error." :
-            r == 2 ? "Just what do you think you&apos;re doing, Dave ?" :
+            r == 2 ? "Just what do you think you're doing, Dave ?" :
             "Dave, stop. Stop, will you ?";
 
         /* Command not found */
-        xmpp_send_message(session.wfs, session.nickname, session.jid,
-                          nick_from, jid_from,
-                          answer, NULL);
+        xmpp_send_message(nick_from, jid_from, answer);
     }
 
     free(jid_from);
@@ -203,5 +155,5 @@ static void xmpp_message_cb(const char *msg_id, const char *msg, void *args)
 
 void xmpp_message_r(void)
 {
-    qh_register("message", xmpp_message_cb, NULL);
+    qh_register("message", 1, xmpp_message_cb, NULL);
 }

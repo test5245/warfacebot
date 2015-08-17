@@ -26,15 +26,15 @@ void game_set(enum e_server server)
     switch (server)
     {
         case SERVER_EU:
-            game_version = "1.1.1.3579";
+            game_version = "1.1.1.3624";
             game_xmpp_server = "com-eu.wfw.warface.com";
             break;
         case SERVER_NA:
-            game_version = "1.1.1.3579";
+            game_version = "1.1.1.3624";
             game_xmpp_server = "com-us.wfw.warface.com";
             break;
         case SERVER_TR:
-            game_version = "1.1.1.3579";
+            game_version = "1.1.1.3624";
             game_xmpp_server = "185.28.0.12";
             break;
         /*
@@ -44,11 +44,13 @@ void game_set(enum e_server server)
             break;
         */
         case SERVER_RU:
-            game_version = "1.1.1.837";
-            game_xmpp_server = "s2.warface.ru";
+            game_version = "1.1.1.850";
+            game_xmpp_server = "s0.warface.ru"; // Alfa server
+            //game_xmpp_server = "s1.warface.ru"; // Bravo server
+            //game_xmpp_server = "s2.warface.ru"; // Charlie server
             break;
         case SERVER_VN:
-            game_version = "1.1.1.179";
+            game_version = "1.1.1.242";
             game_xmpp_server = "rrdns.warface.goplay.vn";
             break;
         default:

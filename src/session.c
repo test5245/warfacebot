@@ -19,6 +19,9 @@
 #include <wb_session.h>
 #include <wb_list.h>
 #include <wb_friend.h>
+#include <wb_clanmate.h>
+#include <wb_mission.h>
+#include <wb_room.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -30,13 +33,20 @@ void session_init(int fd, const char *online_id)
     session.wfs = fd;
     session.active = 1;
     session.online_id = strdup(online_id);
+    session.leaving = 0;
+    session.ingameroom = 0;
 
     friend_list_init();
+    clanmate_list_init();
+    mission_list_init();
+    room_list_init();
 }
 
 void session_free(void)
 {
     friend_list_free();
+    clanmate_list_free();
+    mission_list_free();
 
     free(session.jid);
     free(session.nickname);
@@ -44,4 +54,5 @@ void session_free(void)
     free(session.profile_id);
     free(session.online_id);
     free(session.channel);
+    free(session.clan_name);
 }

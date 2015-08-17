@@ -20,6 +20,7 @@
 #include <wb_geoip.h>
 #include <wb_stream.h>
 #include <wb_session.h>
+#include <wb_xml.h>
 #include <wb_xmpp.h>
 #include <wb_xmpp_wf.h>
 
@@ -31,13 +32,9 @@
 
 struct cb_args
 {
-    char *nick_to;
-    char *jid_to;
-    char *ip;
-    enum e_status status;
+    f_profile_info_get_status_cb cb;
+    void *args;
 };
-
-static void *thread_get_geoloc(void *vargs);
 
 static void xmpp_iq_profile_info_get_status_cb(const char *msg, void *args)
 {
@@ -58,90 +55,33 @@ static void xmpp_iq_profile_info_get_status_cb(const char *msg, void *args)
 
     struct cb_args *a = (struct cb_args *) args;
 
-    if (strstr(msg, "type='result'") == NULL
-        || a->nick_to == NULL
-        || a->jid_to == NULL)
+    if (xmpp_is_error(msg))
     {
-        free(a->nick_to);
-        free(a->jid_to);
+        if (a->cb)
+            a->cb(NULL, a->args);
+
         free(a);
+        return;
     }
 
     char *info = get_info(msg, "<info", "/>", NULL);
 
-    if (info == NULL)
-    {
-        xmpp_send_message(session.wfs, session.nickname, session.jid,
-                          a->nick_to, a->jid_to,
-                          "I don&apos;t know that guy...", NULL);
-    }
-    else
-    {
-        a->status = get_info_int(info, "status='", "'", NULL);
-        a->ip = get_info(info, "ip_address='", "'", NULL);
+    if (a->cb)
+        a->cb(info, a->args);
 
-        pthread_t thread_gl;
-
-        if (pthread_create(&thread_gl, NULL, thread_get_geoloc, args) == -1)
-            perror("pthread_create");
-
-        pthread_detach(thread_gl);
-    }
-
+    free(a);
     free(info);
 }
 
-static void *thread_get_geoloc(void *vargs)
-{
-    struct cb_args *a = (struct cb_args *) vargs;
-    struct geoip *g = geoip_get_info(a->ip, 0);
-
-    enum e_status i_status = a->status;
-    const char *s_status = a->status & STATUS_AFK ? "AFK" :
-        i_status & STATUS_PLAYING ? "playing" :
-        i_status & STATUS_SHOP ? "in shop" :
-        i_status & STATUS_INVENTORY ? "in inventory" :
-        i_status & STATUS_ROOM ? "in a room" :
-        i_status & STATUS_LOBBY ? "in lobby" :
-        i_status & STATUS_ONLINE ? "connecting" :
-        "offline"; /* wut ? impossible !§§!§ */
-
-    int r = time(NULL) % 3;
-    const char *format = r == 0 ? "He&apos;s from %s... currently %s" :
-        r == 1 ? "That&apos;s a guy from %s. He is %s" :
-        "I met him in %s but now he&apos;s %s";
-
-    char *message;
-
-    if (g == NULL)
-        FORMAT(message, "He's %s", s_status);
-    else
-        FORMAT(message, format, g->country_name, s_status);
-
-    geoip_free(g);
-
-    xmpp_send_message(session.wfs, session.nickname, session.jid,
-                      a->nick_to, a->jid_to,
-                      message, NULL);
-
-    free(message);
-
-    free(a->ip);
-    free(a->nick_to);
-    free(a->jid_to);
-    free(a);
-
-    pthread_exit(NULL);
-}
-
 void xmpp_iq_profile_info_get_status(const char *nickname,
-                                     const char *nick_to,
-                                     const char *jid_to)
+                                     f_profile_info_get_status_cb f,
+                                     void *args)
 {
+    char *nick = strdup(nickname);
     struct cb_args *a = calloc(1, sizeof (struct cb_args));
 
-    a->nick_to = strdup(nick_to);
-    a->jid_to = strdup(jid_to);
+    a->cb = f;
+    a->args = args;
 
     t_uid id;
 
@@ -154,5 +94,7 @@ void xmpp_iq_profile_info_get_status(const char *nickname,
                        "<profile_info_get_status nickname='%s'/>"
                        "</query>"
                        "</iq>",
-                       &id, nickname);
+                       &id, xml_serialize_inplace(&nick));
+
+    free(nick);
 }

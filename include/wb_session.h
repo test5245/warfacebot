@@ -34,6 +34,21 @@ enum e_status
     STATUS_INVENTORY = 1 << 7,
 };
 
+enum e_clan_role
+{
+    CLAN_MASTER = 1,
+    CLAN_OFFICER = 2,
+    CLAN_MEMBER = 3,
+};
+
+enum e_class
+{
+    CLASS_RIFLEMAN = 0,
+    CLASS_SNIPER = 2,
+    CLASS_MEDIC = 3,
+    CLASS_ENGINEER = 4,
+};
+
 struct session
 {
     int wfs;
@@ -44,10 +59,21 @@ struct session
     char *profile_id;
     char *online_id;
     char *channel;
+    char *gameroom_jid;
     struct list *friends;
-    int status;
-    int experience;
-    char *room_jid;
+    struct list *clanmates;
+    struct list *missions;
+    enum e_status status;
+    unsigned int experience;
+    unsigned int clan_points;
+    enum e_clan_role clan_role;
+    unsigned int clan_id;
+    char *clan_name;
+    unsigned int clan_joined;
+    enum e_class curr_class;
+    char leaving;
+    char ingameroom;
+    struct list *rooms;
 };
 
 extern struct session session;

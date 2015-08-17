@@ -22,6 +22,7 @@
 #include <wb_xmpp.h>
 #include <wb_xmpp_wf.h>
 #include <wb_game.h>
+#include <wb_mission.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,12 +34,49 @@ static void xmpp_iq_create_profile_cb(const char *msg, void *args)
 
     if (xmpp_is_error(msg))
     {
-        fprintf(stderr, "Failed to create profile\n");
+        fprintf(stderr, "Failed to create profile\nReason: ");
+
+        int code = get_info_int(msg, "code='", "'", NULL);
+        int custom_code = get_info_int(msg, "custom_code='", "'", NULL);
+
+        switch (code)
+        {
+            case 503:
+                fprintf(stderr, "Invalid channel (%s)\n", session.channel);
+                return;
+            case 8:
+                switch (custom_code)
+                {
+                    case 0:
+                        fprintf(stderr, "Invalid token (%s) or userid (%s)\n",
+                                session.active_token,
+                                session.online_id);
+                        return;
+                    case 1:
+                        fprintf(stderr, "Invalid profile_id (%s)\n",
+                                session.profile_id);
+                        return;
+                    case 2:
+                        fprintf(stderr, "Game version mismatch (%s)\n",
+                                game_version_get());
+                        return;
+                    default:
+                        fprintf(stderr, "Unknown\n");
+                        return;
+                }
+            default:
+                fprintf(stderr, "Unknown\n");
+                return;
+        }
+
         return;
     }
 
     session.profile_id = get_info(data, "profile_id='", "'", "PROFILE ID");
     session.nickname = get_info(data, "nick='", "'", "NICKNAME");
+
+    /* Ask for today's missions list */
+    mission_list_update(NULL, NULL);
 
     free(data);
 }

@@ -43,44 +43,47 @@ static void xmpp_iq_gameroom_join_cb(const char *msg, void *args)
        </iq>
      */
 
-    if (xmpp_is_error(msg))
-        return;
-
-    /* Leave previous room if any */
-    if (session.room_jid != NULL)
-        xmpp_presence(session.room_jid, 1);
-
     struct cb_args *a = (struct cb_args *) args;
 
-    /* Join XMPP room */
-    char *room_jid;
+    if (!xmpp_is_error(msg))
+    {
 
-    FORMAT(room_jid, "room.%s.%s@conference.warface", a->channel, a->room_id);
-    xmpp_presence(room_jid, 0);
-    free(room_jid);
+        session.ingameroom = 1;
 
-    /* Change public status */
-    xmpp_iq_player_status(STATUS_ONLINE | STATUS_ROOM);
+        /* Leave previous room if any */
+        if (session.gameroom_jid != NULL)
+        {
+            xmpp_presence(session.gameroom_jid, 1);
+            free(session.gameroom_jid);
+            session.gameroom_jid = NULL;
+        }
+
+        /* Join XMPP room */
+        char *room_jid;
+
+        FORMAT(room_jid, "room.%s.%s@conference.warface",
+               a->channel, a->room_id);
+
+        xmpp_presence(room_jid, 0);
+        session.gameroom_jid = room_jid;
+
+        /* Change public status */
+        xmpp_iq_player_status(STATUS_ONLINE | STATUS_ROOM);
+    }
 
     free(a->room_id);
     free(a->channel);
     free(a);
 }
 
-void xmpp_iq_gameroom_join(const char *channel, const char *room_id)
+static void xmpp_iq_gameroom_join_(void *args)
 {
-    /* 1. Change channel if room is not on the same server */
-    if (strcmp(session.channel, channel))
-        xmpp_iq_join_channel(channel);
-
-    struct cb_args *a = calloc(1, sizeof (struct cb_args));
-    a->channel = strdup(channel);
-    a->room_id = strdup(room_id);
+    struct cb_args *a = (struct cb_args *) args;
 
     t_uid id;
 
     idh_generate_unique_id(&id);
-    idh_register(&id, 0, xmpp_iq_gameroom_join_cb, a);
+    idh_register(&id, 0, xmpp_iq_gameroom_join_cb, args);
 
     /* Open the game room */
     send_stream_format(session.wfs,
@@ -90,6 +93,19 @@ void xmpp_iq_gameroom_join(const char *channel, const char *room_id)
                        "     status='1' class_id='1' join_reason='0'/>"
                        " </query>"
                        "</iq>",
-                       &id, session.channel, room_id);
+                       &id, session.channel, a->room_id);
+}
+
+void xmpp_iq_gameroom_join(const char *channel, const char *room_id)
+{
+    struct cb_args *a = calloc(1, sizeof (struct cb_args));
+    a->channel = strdup(channel);
+    a->room_id = strdup(room_id);
+
+    /* Change channel if room is not on the same server */
+    if (strcmp(session.channel, channel))
+        xmpp_iq_join_channel(channel, xmpp_iq_gameroom_join_, a);
+    else
+        xmpp_iq_gameroom_join_(a);
 }
 

@@ -25,6 +25,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+struct cb_args
+{
+    f_gameroom_open_cb fun;
+    void *args;
+};
+
 static void xmpp_iq_gameroom_open_cb(const char *msg, void *args)
 {
     /* Answer :
@@ -36,35 +42,57 @@ static void xmpp_iq_gameroom_open_cb(const char *msg, void *args)
        </iq>
      */
 
+    struct cb_args *a = (struct cb_args *) args;
+
     if (xmpp_is_error(msg))
+    {
+        free(a);
         return;
+    }
+
+    session.ingameroom = 1;
 
     /* Leave previous room if any */
-    if (session.room_jid != NULL)
-        xmpp_presence(session.room_jid, 1);
+    if (session.gameroom_jid != NULL)
+    {
+        xmpp_presence(session.gameroom_jid, 1);
+        free(session.gameroom_jid);
+        session.gameroom_jid = NULL;
+    }
 
     xmpp_iq_player_status(STATUS_ONLINE | STATUS_ROOM);
 
     char *data = wf_get_query_content(msg);
     char *room = get_info(data, "room_id='", "'", "Room ID");
 
+    free(data);
+
     /* Join XMPP room */
     char *room_jid;
 
     FORMAT(room_jid, "room.%s.%s@conference.warface", session.channel, room);
     xmpp_presence(room_jid, 0);
-    free(room_jid);
+    session.gameroom_jid = room_jid;
+
+    if (a->fun != NULL)
+        a->fun(room, a->args);
 
     free(room);
-    free(data);
+
+    free(a);
 }
 
-void xmpp_iq_gameroom_open(const char *mission_key)
+void xmpp_iq_gameroom_open(const char *mission_key,
+                           f_gameroom_open_cb fun, void *args)
 {
+    struct cb_args *a = calloc(1, sizeof (struct cb_args));
+    a->fun = fun;
+    a->args = args;
+
     t_uid id;
 
     idh_generate_unique_id(&id);
-    idh_register(&id, 0, xmpp_iq_gameroom_open_cb, NULL);
+    idh_register(&id, 0, xmpp_iq_gameroom_open_cb, a);
 
     /* Open the game room */
     send_stream_format(session.wfs,

@@ -33,6 +33,7 @@
 #include <wb_xmpp_wf.h>
 #include <wb_tools.h>
 #include <wb_session.h>
+#include <wb_cmd.h>
 
 /** THEADS **/
 
@@ -52,29 +53,75 @@ void *thread_readline(void *varg)
         char *buff_readline = readline("CMD# ");
 
         if (buff_readline == NULL)
-            session.active = 0;
+        {
+            if (session.active)
+            {
+                xmpp_iq_player_status(STATUS_OFFLINE);
+                xmpp_close(session.wfs);
+            }
+
+            free(buff_readline);
+            break;
+        }
+
+        int buff_size = strlen(buff_readline);
+
+        if (buff_size <= 1)
+            flush_stream(wfs);
         else
         {
-            int buff_size = strlen(buff_readline);
+            add_history(buff_readline);
 
-            if (buff_size <= 1)
-                flush_stream(wfs);
-            else
+            if (strstr(buff_readline, "remove"))
             {
-                add_history(buff_readline);
-                send_stream(wfs, buff_readline, buff_size);
-                sleep(1);
+                char *nickname = strchr(buff_readline, ' ');
+
+                if (nickname != NULL)
+                    cmd_remove_friend(nickname + 1);
             }
+
+            else if (strstr(buff_readline, "whois"))
+            {
+                char *nickname = strchr(buff_readline, ' ');
+
+                if (nickname != NULL)
+                    cmd_whois(nickname + 1, NULL, NULL);
+            }
+
+            else if (strstr(buff_readline, "missions"))
+            {
+                cmd_missions(NULL, NULL);
+            }
+
+            else if (strstr(buff_readline, "say"))
+            {
+                char *message = strchr(buff_readline, ' ');
+
+                if (message != NULL)
+                    cmd_say(message + 1);
+            }
+
+            else if (strstr(buff_readline, "leave"))
+            {
+                cmd_leave();
+            }
+
+            else
+                send_stream(wfs, buff_readline, buff_size);
+            sleep(1);
         }
+
+        free(buff_readline);
     } while (session.active);
 
+    session.active = 0;
     printf("Closed readline\n");
     pthread_exit(NULL);
 }
 #endif
 
 #ifdef STAT_BOT
-static void print_number_of_players_cb(const char *msg)
+static void print_number_of_players_cb(const char *msg, void *args)
 {
     unsigned int count_all = 0;
     unsigned int count_pvp = 0;
@@ -110,7 +157,7 @@ void *thread_stats(void *varg)
 {
     int wfs = session.wfs;
 
-    idh_register((t_uid *) "stats", &print_number_of_players_cb, 1);
+    idh_register((t_uid *) "stats", 1, &print_number_of_players_cb, NULL);
 
     sleep(3);
 
@@ -133,12 +180,19 @@ void *thread_dispatch(void *vargs)
     XMPP_REGISTER_QUERY_HDLR();
     XMPP_WF_REGISTER_QUERY_HDLR();
 
-    int size = 0;
     do {
         char *msg = read_stream_keep(session.wfs);
 
-        if (msg == NULL)
+        if (msg == NULL || strlen(msg) <= 0)
+        {
+            if (session.active)
+            {
+                xmpp_iq_player_status(STATUS_OFFLINE);
+                xmpp_close(session.wfs);
+            }
+
             break;
+        }
 
         char *msg_id = get_msg_id(msg);
 
@@ -164,11 +218,10 @@ void *thread_dispatch(void *vargs)
             free(stanza);
         }
 
-        size = strlen(msg);
         free(msg);
         free(msg_id);
 
-    } while (size > 0 && session.active);
+    } while (session.active);
 
     session.active = 0;
     printf("Closed idle\n");
@@ -184,27 +237,22 @@ void idle(void)
 
 # ifdef STAT_BOT
     thread_func = &thread_stats;
-# elif DEBUG
+# elif defined (DEBUG)
     thread_func = &thread_readline;
 # endif
 
     if (pthread_create(&thread_dl, NULL, thread_func, NULL) == -1)
         perror("pthread_create");
-    pthread_join(thread_dl, NULL);
 
-#else /* STAT_BOT || DEBUG */
-
-    while (session.active)
-        sleep(1);
-
-#endif /* STAT_BOT || DEBUG */
+    pthread_detach(thread_dl);
+#endif
 }
 
 int main(int argc, char *argv[])
 {
     if (argc <= 2)
     {
-        fprintf(stderr, "USAGE: ./wb token online_id [eu/na/tr/vn]\n");
+        fprintf(stderr, "USAGE: ./wb token online_id [eu/na/tr/vn/ru]\n");
         return 2;
     }
 
@@ -220,8 +268,8 @@ int main(int argc, char *argv[])
             server = SERVER_NA;
         else if (strcmp(argv[3], "tr") == 0)
             server = SERVER_TR;
-/*        else if (strcmp(argv[3], "ru") == 0)
-          server = SERVER_RU;*/
+        else if (strcmp(argv[3], "ru") == 0)
+          server = SERVER_RU;
 /*        else if (strcmp(argv[3], "br") == 0)
           server = SERVER_BR;*/
 /*        else if (strcmp(argv[3], "cn") == 0)
@@ -251,11 +299,8 @@ int main(int argc, char *argv[])
     if (session.active)
         pthread_join(thread_di, NULL);
 
-    xmpp_iq_player_status(STATUS_OFFLINE);
-    xmpp_close(wfs);
-
     session_free();
-
+    printf("Warface Bot closed!");
     return 0;
 }
 
